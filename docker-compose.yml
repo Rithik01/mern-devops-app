@@ -1,0 +1,55 @@
+# Docker Compose runs several containers together as one application.
+# Start everything:  docker compose up --build
+# Stop everything:   docker compose down        (add -v to also delete DB data)
+#
+# Values like ${PORT:-5000} mean "use the PORT variable from your .env file,
+# or 5000 if it isn't set". Copy .env.example to .env to customize them.
+
+services:
+  # ---------- Database ----------
+  mongo:
+    image: mongo:7 # ready-made official image from Docker Hub
+    restart: unless-stopped
+    ports:
+      - '27017:27017' # host:container -> reachable at localhost:27017
+    volumes:
+      - mongo_data:/data/db # named volume: data survives container removal
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------- Backend (Express API) ----------
+  backend:
+    build: ./backend # builds the image from backend/Dockerfile
+    restart: unless-stopped
+    ports:
+      - '${PORT:-5000}:${PORT:-5000}'
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${PORT:-5000}
+      # "mongo" is the service name above. Docker's internal network turns
+      # that name into the mongo container's IP address. NOT localhost!
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/mern_devops}
+    depends_on:
+      mongo:
+        condition: service_healthy # wait until MongoDB answers pings
+
+  # ---------- Frontend (React, served by nginx) ----------
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Baked into the JS at build time. The BROWSER calls this URL, so it
+        # must be reachable from your computer (localhost), not a service name.
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:5000/api}
+    restart: unless-stopped
+    ports:
+      - '5173:8080' # nginx listens on 8080 inside the container
+    depends_on:
+      - backend
+
+# Named volumes are managed by Docker and persist between runs.
+volumes:
+  mongo_data:

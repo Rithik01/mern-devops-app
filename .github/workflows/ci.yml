@@ -1,0 +1,83 @@
+# Continuous Integration (CI): automatically checks the code on every push
+# and pull request. It does NOT deploy anything (that comes later).
+name: CI
+
+# WHEN does this workflow run?
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least privilege: CI only needs to read the code.
+permissions:
+  contents: read
+
+jobs:
+  # Each job runs on its own fresh virtual machine. The two jobs below have
+  # no dependency on each other, so GitHub runs them in parallel.
+  backend:
+    name: Backend (lint, format, test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend # every "run" step starts in ./backend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm # cache downloaded packages between runs
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci # exact versions from package-lock.json
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Prettier check
+        run: npm run format:check
+
+      - name: Tests
+        run: npm test
+
+  frontend:
+    name: Frontend (lint, format, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Prettier check
+        run: npm run format:check
+
+      - name: Build
+        run: npm run build
+        env:
+          # Build-time config for Vite; in CI any valid URL works.
+          VITE_API_URL: http://localhost:5000/api
+
+  # FUTURE (Phase 5-7): add jobs here, e.g.
+  # docker-build:
+  #   needs: [backend, frontend]
+  #   ... build & push images, then deploy to AWS

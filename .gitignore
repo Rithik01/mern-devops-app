@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Secrets - never commit real env files (the .example files ARE committed)
+.env
+.env.*
+!.env.example
+
+# Build output / test output
+dist/
+build/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Docker temporary files
+docker-compose.override.yml
+.docker/
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
