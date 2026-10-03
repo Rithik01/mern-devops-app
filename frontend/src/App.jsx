@@ -37,6 +37,7 @@ export default function App() {
   return (
     <main className="container">
       <h1>Task Manager</h1>
+      <h2>Hiiiiii, My name is Rithik</h2>
       <TaskForm onCreate={(task) => run(() => api.createTask(task))} />
 
       {error && <p className="error">{error}</p>}
