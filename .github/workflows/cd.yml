@@ -1,0 +1,71 @@
+# Continuous Deployment (CD): after CI passes on main, log in to the EC2
+# instance over SSH, pull the new code and rebuild the containers.
+name: CD
+
+on:
+  # Run only after the "CI" workflow has finished on main...
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  # ...or manually from the Actions tab ("Run workflow" button).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never run two deployments at once; a newer one waits for the current one.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    # Skip if CI failed (manual runs always go ahead).
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    environment: production # lets you add an approval gate in repo settings
+    env:
+      # The exact commit that passed CI (or the current one for manual runs).
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: Configure SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy over SSH
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+            "APP_DIR='${{ secrets.EC2_APP_DIR }}' DEPLOY_SHA='$DEPLOY_SHA' bash -s" <<'EOF'
+          set -euo pipefail
+          cd "$APP_DIR"
+
+          # Get exactly the commit that passed CI. The untracked .env stays untouched.
+          git fetch origin main
+          git reset --hard "$DEPLOY_SHA"
+
+          # Rebuild changed images and restart only what changed.
+          docker compose up -d --build --remove-orphans
+
+          # Wait up to ~60s for the API to answer.
+          for i in $(seq 1 12); do
+            if curl -fsS http://localhost:5000/api/health > /dev/null; then
+              echo "Deployed $DEPLOY_SHA - backend healthy"
+              docker image prune -f
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "Backend did not become healthy" >&2
+          docker compose logs --tail 50 backend
+          exit 1
+          EOF
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
